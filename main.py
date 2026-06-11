@@ -8,8 +8,8 @@ import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # ─── CONFIGURATION & MULTI-API POOL ─────────────────────────────────────────
-# Security Tip: Professional විදිහට කරද්දී මේ key එක Cloud platform එකේ Environment Variables වලට දාන්න.
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+# 🔒 API Key එක දැන් කෝඩ් එකේ නැහැ. Render එකේ Env Var එකෙන් විතරයි ගන්නේ.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # 🚀 සාමාන්‍ය ප්‍රශ්න වලට සහ රූපවාහිනී/ඡායාරූප කියවීමට වෙන වෙනම සුපිරි මොඩල්ස් පූල් එකක් සකසා ඇත
@@ -275,6 +275,14 @@ class Server(BaseHTTPRequestHandler):
         global chat_history
         if self.path == '/chat':
             try:
+                # API Key එක Env Variables වලින් ඇවිත් නැත්නම් Error එකක් දෙනවා
+                if not GROQ_API_KEY:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "GROQ_API_KEY සෙට් කරලා නැත! Render Env සෙටින්ග්ස් බලන්න."}).encode('utf-8'))
+                    return
+
                 content_length = int(self.headers['Content-Length'])
                 req_data = json.loads(self.rfile.read(content_length).decode('utf-8'))
                 
@@ -286,12 +294,9 @@ class Server(BaseHTTPRequestHandler):
                     return
 
                 user_msg = req_data.get('msg', '')
-                user_image = req_data.get('image', '') # Base64 Data URI
-                
-                # Dynamic Message Construction (History එක පැටලෙන්නේ නැති වෙන්න)
+                user_image = req_data.get('image', '')
                 current_api_messages = list(chat_history)
                 
-                # මොඩල් එක තෝරාගැනීම (රූපයක් ඇත්නම් Vision Model, නැත්නම් Text Model)
                 selected_model = TEXT_MODEL
                 engine_name = "Llama 3.3 Text"
                 
@@ -300,7 +305,6 @@ class Server(BaseHTTPRequestHandler):
                     engine_name = "Llama 3.2 Vision"
                     print("[VISION] Image detected. Switching payload to Vision API...", flush=True)
                     
-                    # Vision API Payload හැදීම
                     vision_content = [
                         {"type": "text", "text": user_msg if user_msg else "Describe this image contextually."},
                         {
@@ -309,10 +313,8 @@ class Server(BaseHTTPRequestHandler):
                         }
                     ]
                     current_api_messages.append({"role": "user", "content": vision_content})
-                    # දිගුකාලීන මතකය සඳහා පිරිසිදු ටෙක්ස්ට් එක පමණක් ඉතිරි කිරීම
                     chat_history.append({"role": "user", "content": f"[User sent an image] {user_msg}"})
                 else:
-                    # 🌐 රූපයක් නැත්නම් පමණක් ලයිව් සර්ච් කිරීම
                     web_info = live_web_search(user_msg)
                     if web_info:
                         formatted_prompt = f"[LIVE INTERNET CONTEXT]:\n{web_info}\n\n[USER QUESTION]: {user_msg}"
@@ -337,8 +339,6 @@ class Server(BaseHTTPRequestHandler):
                 if res.status_code == 200:
                     res_json = res.json()
                     reply = res_json['choices'][0]['message']['content']
-                    
-                    # බෝට්ගේ පිළිතුර මතකයට එක් කිරීම
                     chat_history.append({"role": "assistant", "content": reply})
                     
                     self.send_response(200)
@@ -360,7 +360,6 @@ class Server(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
 if __name__ == "__main__":
-    # Render වගේ Cloud Platform වලින් දෙන PORT එක අල්ලගන්නවා (0.0.0.0 Host එක එක්ක)
     PORT = int(os.environ.get("PORT", 8080))
     server = ThreadingHTTPServer(('0.0.0.0', PORT), Server)
     os.system('clear' if os.name == 'posix' else 'cls')
